@@ -1,0 +1,9 @@
+.venv
+
+build
+
+dist
+
+dm_print.png
+
+*.spec
