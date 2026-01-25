@@ -9,3 +9,7 @@ dm_print.png
 *.spec
 
 .env
+
+history
+
+*.xlsx

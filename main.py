@@ -8,12 +8,14 @@ from PIL import Image, ImageWin
 from pylibdmtx.pylibdmtx import encode
 from pynput import keyboard
 from openpyxl import Workbook, load_workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from dotenv import load_dotenv
 
 load_dotenv()
 
 # --- НАСТРОЙКИ ---
 SERVER_URL = f"{os.getenv('SERVER_IP')}/ws-print"
+SERVER_URL = f"wss://fx2swj-176-52-40-27.ru.tuna.am/ws-print"
 HISTORY_FOLDER = "history"
 EXCEL_FILE = "report.xlsx"
 
@@ -33,7 +35,7 @@ def save_to_report(text, file_path):
         wb = load_workbook(EXCEL_FILE)
         ws = wb.active
 
-    ws.append([timestamp, text, os.path.basename(file_path)])
+    ws.append([timestamp, ILLEGAL_CHARACTERS_RE.sub(r'', text), os.path.basename(file_path)])
     wb.save(EXCEL_FILE)
 
 def process_and_print(text):
@@ -43,7 +45,7 @@ def process_and_print(text):
         # 1. Генерация Data Matrix
         encoded = encode(text.encode('utf-8'))
         img = Image.frombytes('RGB', (encoded.width, encoded.height), encoded.pixels)
-        img = img.resize((400, 400), Image.NEAREST)
+        img = img.resize((800, 800), Image.NEAREST)
 
         # 2. Сохранение в папку истории с уникальным именем
         file_name = f"scan_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.png"
@@ -62,7 +64,7 @@ def process_and_print(text):
         hDC.StartDoc("DM_Job")
         hDC.StartPage()
         dib = ImageWin.Dib(bmp)
-        dib.draw(hDC.GetHandleOutput(), (100, 100, 600, 600))
+        dib.draw(hDC.GetHandleOutput(), (100, 100, 900, 900))
         hDC.EndPage()
         hDC.EndDoc()
         hDC.DeleteDC()
