@@ -7,3 +7,5 @@ dist
 dm_print.png
 
 *.spec
+
+.env

@@ -30,47 +30,44 @@ async def index():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <script src="https://unpkg.com/html5-qrcode"></script>
         <style>
-            body { font-family: sans-serif; text-align: center; background: #f4f4f4; margin: 0; padding: 20px; }
-            #reader { width: 100%; max-width: 400px; margin: auto; border-radius: 10px; overflow: hidden; }
-            .status { margin-top: 20px; padding: 15px; background: white; border-radius: 10px; }
+            body { font-family: sans-serif; text-align: center; margin: 0; padding: 20px; background: #eef2f7; }
+            #reader { width: 100%; max-width: 400px; margin: auto; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+            .info { margin-top: 15px; padding: 10px; background: #fff; border-radius: 8px; font-size: 14px; }
         </style>
     </head>
     <body>
-        <h2>Сканер Data Matrix</h2>
+        <h3>Сканер Маркировки</h3>
         <div id="reader"></div>
-        <div id="status" class="status">Ожидание сканирования...</div>
+        <div id="status" class="info">Наведите камеру на Data Matrix</div>
 
         <script>
             const html5QrCode = new Html5Qrcode("reader");
-            let isPaused = false;
+            let busy = false;
 
-            async function onScanSuccess(decodedText) {
-                if (isPaused) return;
-                isPaused = true;
+            async function onScan(text) {
+                if (busy) return;
+                busy = true;
                 html5QrCode.pause();
                 
-                document.getElementById('status').innerText = "Отправка: " + decodedText;
+                document.getElementById('status').innerText = "Отправка в отчет...";
 
                 await fetch('/send-to-print', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({data: decodedText})
+                    body: JSON.stringify({data: text})
                 });
 
-                alert("Код отправлен на печать!");
-                isPaused = false;
+                alert("Готово! Данные в отчете и на печати.");
+                busy = false;
                 html5QrCode.resume();
-                document.getElementById('status').innerText = "Готов к следующему коду";
+                document.getElementById('status').innerText = "Жду следующий код";
             }
 
-            // Настройка именно под Data Matrix
-            const config = { 
-                fps: 10, 
-                qrbox: 250,
-                formatsToSupport: [ Html5QrcodeSupportedFormats.DATA_MATRIX ]
-            };
-            
-            html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess);
+            html5QrCode.start(
+                { facingMode: "environment" }, 
+                { fps: 10, qrbox: 250, formatsToSupport: [ Html5QrcodeSupportedFormats.DATA_MATRIX ] }, 
+                onScan
+            );
         </script>
     </body>
     </html>
