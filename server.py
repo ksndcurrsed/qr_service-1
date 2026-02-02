@@ -1,25 +1,24 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from collections import deque
+import asyncio
 
 app = FastAPI()
 
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
+# Разрешаем CORS для работы с доменом
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def send_to_pc(self, message: str):
-        for connection in self.active_connections:
-            await connection.send_text(message)
-
-manager = ConnectionManager()
+# Очередь заданий для печати
+print_queue = deque()
+queue_lock = asyncio.Lock()  # Блокировка для безопасной работы с очередью
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
@@ -78,17 +77,47 @@ class ScanData(BaseModel):
 
 @app.post("/send-to-print")
 async def send_to_print(scan: ScanData):
-    await manager.send_to_pc(scan.data)
-    return {"status": "ok"}
+    """Принимает данные от телефона и добавляет в очередь"""
+    async with queue_lock:
+        print_queue.append(scan.data)
+    return {"status": "ok", "message": "Данные добавлены в очередь"}
 
-@app.websocket("/ws-print")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True: await websocket.receive_text()
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
+@app.get("/get-job")
+async def get_job():
+    """Возвращает следующее задание из очереди для клиента"""
+    async with queue_lock:
+        if print_queue:
+            data = print_queue.popleft()
+            return {"status": "ok", "data": data}
+        else:
+            return {"status": "empty", "data": None}
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    import os
+    
+    # Пути к SSL сертификатам (после настройки certbot)
+    ssl_keyfile = "/etc/letsencrypt/live/fffzar-tool.ru/privkey.pem"
+    ssl_certfile = "/etc/letsencrypt/live/fffzar-tool.ru/fullchain.pem"
+    
+    # Проверяем наличие SSL сертификатов
+    key_exists = os.path.exists(ssl_keyfile)
+    cert_exists = os.path.exists(ssl_certfile)
+    
+    print(f"🔍 Проверка SSL: privkey={key_exists}, fullchain={cert_exists}")
+    
+    if key_exists and cert_exists:
+        # Запуск с SSL
+        print("✅ SSL сертификаты найдены. Запуск на HTTPS порту 443")
+        uvicorn.run(
+            app, 
+            host="0.0.0.0", 
+            port=443,
+            ssl_keyfile=ssl_keyfile,
+            ssl_certfile=ssl_certfile
+        )
+    else:
+        # Запуск без SSL (для разработки или если SSL еще не настроен)
+        print("⚠️  SSL сертификаты не найдены. Запуск на HTTP порту 8000")
+        print(f"   Для настройки SSL выполните: certbot certonly --standalone -d fffzar-tool.ru")
+        uvicorn.run(app, host="0.0.0.0", port=8000)

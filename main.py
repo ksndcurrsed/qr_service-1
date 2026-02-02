@@ -1,5 +1,7 @@
+import time
 import asyncio
-import websockets
+import aiohttp
+import ssl
 import os
 import datetime
 import win32print
@@ -14,8 +16,10 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # --- НАСТРОЙКИ ---
-SERVER_URL = f"{os.getenv('SERVER_IP')}/ws-print"
-SERVER_URL = f"wss://fx2swj-176-52-40-27.ru.tuna.am/ws-print"
+SERVER_IP = "84.54.29.24"
+SERVER_DOMAIN = "fffzar-tool.ru"
+# Используем HTTPS после настройки SSL
+SERVER_URL = f"https://{SERVER_DOMAIN}"
 HISTORY_FOLDER = "history"
 EXCEL_FILE = "report.xlsx"
 
@@ -45,7 +49,7 @@ def process_and_print(text):
         # 1. Генерация Data Matrix
         encoded = encode(text.encode('utf-8'))
         img = Image.frombytes('RGB', (encoded.width, encoded.height), encoded.pixels)
-        img = img.resize((800, 800), Image.NEAREST)
+        img = img.resize((150, 150), Image.NEAREST)
 
         # 2. Сохранение в папку истории с уникальным именем
         file_name = f"scan_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.png"
@@ -64,7 +68,7 @@ def process_and_print(text):
         hDC.StartDoc("DM_Job")
         hDC.StartPage()
         dib = ImageWin.Dib(bmp)
-        dib.draw(hDC.GetHandleOutput(), (100, 100, 900, 900))
+        dib.draw(hDC.GetHandleOutput(), (5, 5, 150, 150))
         hDC.EndPage()
         hDC.EndDoc()
         hDC.DeleteDC()
@@ -75,30 +79,63 @@ def process_and_print(text):
 
 # --- Логика перехвата (USB/Bluetooth сканер) ---
 buffer = []
+
+last_key_time = 0
+is_scanner_typing = True
+
 def on_press(key):
-    global buffer
+    global buffer, last_key_time, is_scanner_typing
+    
+    current_time = time.time()
+    # Считаем время с момента прошлого нажатия
+    delay = current_time - last_key_time
+    last_key_time = current_time
+
+    # Если пауза между буквами больше 50мс — это скорее всего человек
+    if delay > 0.05:
+        is_scanner_typing = False
+
     try:
         if key == keyboard.Key.enter:
             msg = "".join(buffer)
-            if msg:
+            if is_scanner_typing and len(msg) > 15:
                 process_and_print(msg)
-                buffer = []
+
+            buffer = []
+            is_scanner_typing = True 
         elif hasattr(key, 'char') and key.char:
             buffer.append(key.char)
-    except: pass
+    except:
+        pass
 
-# --- Связь с облаком (Телефон) ---
+# --- Связь с сервером (HTTP API) ---
 async def listen():
-    while True:
-        try:
-            async with websockets.connect(SERVER_URL) as ws:
-                print("Связь с сервером установлена!")
-                while True:
-                    data = await ws.recv()
-                    process_and_print(data)
-        except Exception:
-            print("Потеря связи. Повтор через 5 сек...")
-            await asyncio.sleep(5)
+    """Опрос сервера на наличие новых заданий для печати"""
+    # Настройка SSL для работы в exe (отключаем проверку сертификата)
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    
+    # Создаем connector с SSL контекстом
+    connector = aiohttp.TCPConnector(ssl=ssl_context)
+    
+    async with aiohttp.ClientSession(connector=connector) as session:
+        print(f"Подключение к серверу: {SERVER_URL}")
+        while True:
+            try:
+                async with session.get(f"{SERVER_URL}/get-job", timeout=aiohttp.ClientTimeout(total=10)) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        if data.get("status") == "ok" and data.get("data"):
+                            process_and_print(data["data"])
+                            print(f"Получено задание: {data['data']}")
+                    await asyncio.sleep(2)  # Проверка каждые 2 секунды
+            except asyncio.TimeoutError:
+                print("Таймаут подключения. Повтор через 5 сек...")
+                await asyncio.sleep(5)
+            except Exception as e:
+                print(f"Ошибка подключения к серверу: {e}. Повтор через 5 сек...")
+                await asyncio.sleep(5)
 
 if __name__ == "__main__":
     keyboard.Listener(on_press=on_press).start()
