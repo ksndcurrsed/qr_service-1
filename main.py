@@ -146,6 +146,13 @@ def process_and_print(text):
         encoded = encode(text.encode('utf-8'))
         img = Image.frombytes('RGB', (encoded.width, encoded.height), encoded.pixels)
 
+        # Тихая зона (белая рамка) — обязательна для надёжного сканирования
+        quiet_zone = max(2, min(encoded.width, encoded.height) // 4)
+        w, h = img.size
+        padded = Image.new('RGB', (w + 2 * quiet_zone, h + 2 * quiet_zone), 'white')
+        padded.paste(img, (quiet_zone, quiet_zone))
+        img = padded
+
         # 2. Создаём DC заранее и берём РЕАЛЬНЫЙ размер страницы у принтера
         printer_name = win32print.GetDefaultPrinter()
         hDC = create_printer_dc(printer_name, LABEL_MM)
@@ -167,8 +174,9 @@ def process_and_print(text):
             except Exception:
                 pass
 
-            # 3. QR/DM занимает заданную долю меньшей стороны, по центру
-            qr_size = max(1, int(min(page_w, page_h) * QR_FILL_RATIO))
+            # 3. QR/DM занимает заданную долю меньшей стороны; не меньше 80 px — иначе принтер "размазывает"
+            min_qr_size = 80
+            qr_size = max(min_qr_size, int(min(page_w, page_h) * QR_FILL_RATIO))
             img = img.resize((qr_size, qr_size), Image.NEAREST)
 
             # 4. Создаём полную этикетку с центрированным QR

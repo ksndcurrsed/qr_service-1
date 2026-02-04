@@ -108,6 +108,13 @@ def print_data_matrix(text: str) -> tuple[bool, str]:
         encoded = encode(text.encode('utf-8'))
         img = Image.frombytes('RGB', (encoded.width, encoded.height), encoded.pixels)
 
+        # Тихая зона (белая рамка) — обязательна для надёжного сканирования
+        quiet_zone = max(2, min(encoded.width, encoded.height) // 4)
+        w, h = img.size
+        padded = Image.new('RGB', (w + 2 * quiet_zone, h + 2 * quiet_zone), 'white')
+        padded.paste(img, (quiet_zone, quiet_zone))
+        img = padded
+
         # 2. Создаём DC и берём реальный размер страницы
         printer_name = win32print.GetDefaultPrinter()
         hDC = create_printer_dc(printer_name, LABEL_MM)
@@ -121,8 +128,9 @@ def print_data_matrix(text: str) -> tuple[bool, str]:
                 page_w = mm_to_px(LABEL_MM[0], dpi_x)
                 page_h = mm_to_px(LABEL_MM[1], dpi_y)
 
-            # 3. QR/DM занимает заданную долю меньшей стороны, по центру
-            qr_size = max(1, int(min(page_w, page_h) * QR_FILL_RATIO))
+            # 3. QR/DM занимает заданную долю меньшей стороны; не меньше 80 px — иначе принтер "размазывает"
+            min_qr_size = 80
+            qr_size = max(min_qr_size, int(min(page_w, page_h) * QR_FILL_RATIO))
             img = img.resize((qr_size, qr_size), Image.NEAREST)
 
             # 4. Создаём полную этикетку с центрированным QR
@@ -276,9 +284,15 @@ class QRScannerWindow(QMainWindow):
             if len(self.input_buffer) > 15:  # Минимальная длина для QR кода
                 self.process_input(self.input_buffer)
             self.input_buffer = ""
-        elif event.text() and event.text().isprintable():
-            # Добавляем символ в буфер
-            self.input_buffer += event.text()
+        else:
+            # Сканер отправляет коды клавиш в ASCII. event.text() зависит от раскладки:
+            # при русской раскладке Q→й, C→с и т.д., из-за чего на печать попадала кириллица.
+            # Берём символ по коду клавиши (32–126 = печатаемый ASCII).
+            key = event.key()
+            if 32 <= key <= 126:
+                self.input_buffer += chr(key)
+            elif event.text() and event.text().isprintable():
+                self.input_buffer += event.text()
 
         # Не вызываем super(), чтобы перехватить все события
         event.accept()
